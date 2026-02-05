@@ -14,7 +14,7 @@ module.exports = class extends Listener {
 		super(client, {
 			...options,
 			emitter: client,
-			event: 'ready',
+			event: 'clientReady',
 			once: true,
 		});
 	}

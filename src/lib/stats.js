@@ -77,8 +77,12 @@ async function sendToHouston(client) {
 	} catch (res) {
 		client.log.warn('The following error is not important and can be safely ignored');
 		try {
-			const json = await res.json();
-			client.log.error('An error occurred whilst posting stats:', json);
+			if (res && typeof res.json === 'function') {
+				const json = await res.json();
+				client.log.error('An error occurred whilst posting stats:', json);
+			} else {
+				client.log.error('An error occurred whilst posting stats:', res?.message || res);
+			}
 		} catch (error) {
 			client.log.error('An error occurred whilst posting stats and the response couldn\'t be parsed:', error.message);
 		}

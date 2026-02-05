@@ -1248,7 +1248,7 @@ module.exports = class TicketManager {
 		/** @type {import("discord.js").TextChannel} */
 		const channel = this.client.channels.cache.get(ticketId);
 		if (channel) {
-			const pinned = await channel.messages.fetchPinned();
+			const pinned = await channel.messages.fetchPins();
 			data.pinnedMessageIds = [...pinned.keys()];
 		}
 
