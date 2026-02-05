@@ -39,10 +39,13 @@ module.exports = class TicketArchiver {
 		try {
 			const queries = [];
 
-			members.add(message.member);
+			// Only add member if it exists (bot messages or failed fetches may not have a member)
+			if (message.member) {
+				members.add(message.member);
+			}
 
 			for (const member of members) {
-				roles.add(hoistedRole(member));
+				if (member) roles.add(hoistedRole(member));
 			}
 
 			for (const role of roles) {
@@ -70,6 +73,7 @@ module.exports = class TicketArchiver {
 			}
 
 			for (const member of members) {
+				if (!member) continue; // Skip null/undefined members
 				const data = {
 					avatar: member.avatar || member.user.avatar, // TODO: save avatar in user/avatars/
 					bot: member.user.bot,
@@ -91,6 +95,35 @@ module.exports = class TicketArchiver {
 							ticketId_userId: {
 								ticketId,
 								userId: member.user.id,
+							},
+						},
+					}),
+				);
+			}
+
+			// Handle case where message.member is null but message.author exists (bot messages, left members, etc.)
+			if (!message.member && message.author) {
+				const authorData = {
+					avatar: message.author.avatar,
+					bot: message.author.bot,
+					discriminator: message.author.discriminator,
+					displayName: await crypto.queue(w => w.encrypt(message.author.displayName || message.author.username)),
+					roleId: null,
+					username: await crypto.queue(w => w.encrypt(message.author.username)),
+				};
+				queries.push(
+					this.client.prisma.archivedUser.upsert({
+						create: {
+							...authorData,
+							ticketId,
+							userId: message.author.id,
+						},
+						select: { ticketId: true },
+						update: authorData,
+						where: {
+							ticketId_userId: {
+								ticketId,
+								userId: message.author.id,
 							},
 						},
 					}),

@@ -124,8 +124,23 @@ module.exports = class TranscriptSlashCommand extends SlashCommand {
 		let transcriptHtml = null;
 		if (this.templateHtml) {
 			// Process messages for HTML (add isImage flag, isPinned, etc.)
+			// Messages are already sorted by createdAt asc from DB (oldest first)
 			const processedMessages = ticket.archivedMessages.map(message => {
 				const processed = { ...message };
+				
+				// Ensure author exists (fallback for bot messages or missing users)
+				if (!processed.author) {
+					processed.author = {
+						avatar: null,
+						bot: true,
+						displayName: 'Unknown User',
+						discriminator: '0000',
+						roleId: null,
+						userId: processed.authorId || 'unknown',
+						username: 'unknown',
+					};
+				}
+				
 				if (processed.content && processed.content.attachments) {
 					processed.content.attachments = processed.content.attachments.map(att => {
 						const isImage = att.contentType && att.contentType.startsWith('image/');
