@@ -1249,7 +1249,16 @@ module.exports = class TicketManager {
 		const channel = this.client.channels.cache.get(ticketId);
 		if (channel) {
 			const pinned = await channel.messages.fetchPins();
-			data.pinnedMessageIds = [...pinned.keys()];
+			// Handle both Collection (older discord.js) and array-like structures (newer discord.js)
+			if (pinned && typeof pinned.keys === 'function') {
+				data.pinnedMessageIds = [...pinned.keys()];
+			} else if (pinned && Array.isArray(pinned)) {
+				data.pinnedMessageIds = pinned.map(m => m.id);
+			} else if (pinned && typeof pinned[Symbol.iterator] === 'function') {
+				data.pinnedMessageIds = [...pinned].map(m => m.id || m);
+			} else {
+				data.pinnedMessageIds = [];
+			}
 		}
 
 		try {
