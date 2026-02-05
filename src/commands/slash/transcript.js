@@ -43,11 +43,19 @@ module.exports = class TranscriptSlashCommand extends SlashCommand {
 			}),
 		});
 
-		Mustache.escape = text => text; // don't HTML-escape
-		this.template = fs.readFileSync(
+		Mustache.escape = text => text; // don't HTML-escape for MD
+		this.templateMd = fs.readFileSync(
 			join('./user/templates/', this.client.config.templates.transcript + '.mustache'),
 			{ encoding: 'utf8' },
 		);
+		
+		// Load HTML template if enabled in config
+		if (this.client.config.templates.transcriptHtml !== false) {
+			const htmlTemplatePath = join('./user/templates/', 'transcript.html.mustache');
+			if (fs.existsSync(htmlTemplatePath)) {
+				this.templateHtml = fs.readFileSync(htmlTemplatePath, { encoding: 'utf8' });
+			}
+		}
 	}
 
 	shouldAllowAccess(interaction, ticket) {
@@ -72,38 +80,114 @@ module.exports = class TranscriptSlashCommand extends SlashCommand {
 			.replace(/{+\s?(user)?name\s?}+/gi, ticket.createdBy?.username)
 			.replace(/{+\s?(nick|display)(name)?\s?}+/gi, ticket.createdBy?.displayName)
 			.replace(/{+\s?num(ber)?\s?}+/gi, ticket.number);
-		const fileName = `${channelName}.${this.client.config.templates.transcript.split('.').slice(-1)[0]}`;
-		const transcript = Mustache.render(this.template, {
+		const fileNameMd = `${channelName}.${this.client.config.templates.transcript.split('.').slice(-1)[0]}`;
+		const fileNameHtml = `${channelName}.html`;
+
+		// Common template data
+		const closedAtFull = function () {
+			return new Intl.DateTimeFormat([ticket.guild.locale, 'en-GB'], {
+				dateStyle: 'full',
+				timeStyle: 'long',
+				timeZone: 'Etc/UTC',
+			}).format(this.closedAt);
+		};
+		const createdAtFull = function () {
+			return new Intl.DateTimeFormat([ticket.guild.locale, 'en-GB'], {
+				dateStyle: 'full',
+				timeStyle: 'long',
+				timeZone: 'Etc/UTC',
+			}).format(this.createdAt);
+		};
+		const createdAtTimestamp = function () {
+			return new Intl.DateTimeFormat([ticket.guild.locale, 'en-GB'], {
+				dateStyle: 'short',
+				timeStyle: 'long',
+				timeZone: 'Etc/UTC',
+			}).format(this.createdAt);
+		};
+
+		const guildName = client.guilds.cache.get(ticket.guildId)?.name;
+		const pinned = ticket.pinnedMessageIds.join(', ');
+
+		// Render MD transcript
+		const transcriptMd = Mustache.render(this.templateMd, {
 			channelName,
-			closedAtFull: function () {
-				return new Intl.DateTimeFormat([ticket.guild.locale, 'en-GB'], {
-					dateStyle: 'full',
-					timeStyle: 'long',
-					timeZone: 'Etc/UTC',
-				}).format(this.closedAt);
-			},
-			createdAtFull: function () {
-				return new Intl.DateTimeFormat([ticket.guild.locale, 'en-GB'], {
-					dateStyle: 'full',
-					timeStyle: 'long',
-					timeZone: 'Etc/UTC',
-				}).format(this.createdAt);
-			},
-			createdAtTimestamp: function () {
-				return new Intl.DateTimeFormat([ticket.guild.locale, 'en-GB'], {
-					dateStyle: 'short',
-					timeStyle: 'long',
-					timeZone: 'Etc/UTC',
-				}).format(this.createdAt);
-			},
-			guildName: client.guilds.cache.get(ticket.guildId)?.name,
-			pinned: ticket.pinnedMessageIds.join(', '),
+			closedAtFull,
+			createdAtFull,
+			createdAtTimestamp,
+			guildName,
+			pinned,
 			ticket,
 		});
 
+		// Prepare HTML-specific data
+		let transcriptHtml = null;
+		if (this.templateHtml) {
+			// Process messages for HTML (add isImage flag, isPinned, etc.)
+			const processedMessages = ticket.archivedMessages.map(message => {
+				const processed = { ...message };
+				if (processed.content && processed.content.attachments) {
+					processed.content.attachments = processed.content.attachments.map(att => {
+						const isImage = att.contentType && att.contentType.startsWith('image/');
+						return { ...att, isImage };
+					});
+				}
+				// Check if message is pinned
+				processed.isPinned = ticket.pinnedMessageIds.includes(message.number);
+				return processed;
+			});
+
+			// Generate rating stars for feedback
+			let ratingStars = [];
+			let ratingEmpty = [];
+			if (ticket.feedback?.rating) {
+				for (let i = 0; i < ticket.feedback.rating; i++) ratingStars.push(true);
+				for (let i = ticket.feedback.rating; i < 5; i++) ratingEmpty.push(true);
+			}
+
+			const generatedAt = new Intl.DateTimeFormat([ticket.guild.locale, 'en-GB'], {
+				dateStyle: 'full',
+				timeStyle: 'long',
+				timeZone: 'Etc/UTC',
+			}).format(new Date());
+
+			// Create a copy of ticket with processed messages for HTML
+			const ticketForHtml = {
+				...ticket,
+				archivedMessages: processedMessages,
+			};
+
+			// Use a separate Mustache instance for HTML to enable escaping
+			const MustacheHtml = { ...Mustache };
+			MustacheHtml.escape = text => {
+				if (typeof text !== 'string') return text;
+				return text
+					.replace(/&/g, '&amp;')
+					.replace(/</g, '&lt;')
+					.replace(/>/g, '&gt;')
+					.replace(/"/g, '&quot;')
+					.replace(/'/g, '&#39;');
+			};
+
+			transcriptHtml = Mustache.render(this.templateHtml, {
+				channelName,
+				closedAtFull,
+				createdAtFull,
+				createdAtTimestamp,
+				generatedAt,
+				guildName,
+				pinned,
+				ratingEmpty,
+				ratingStars,
+				ticket: ticketForHtml,
+			});
+		}
+
 		return {
-			fileName,
-			transcript,
+			fileNameHtml,
+			fileNameMd,
+			transcriptHtml,
+			transcriptMd,
 		};
 	}
 
@@ -162,14 +246,29 @@ module.exports = class TranscriptSlashCommand extends SlashCommand {
 		}
 
 		const {
-			fileName,
-			transcript,
+			fileNameHtml,
+			fileNameMd,
+			transcriptHtml,
+			transcriptMd,
 		} = await this.fillTemplate(ticket);
-		const attachment = new AttachmentBuilder()
-			.setFile(Buffer.from(transcript))
-			.setName(fileName);
+		
+		const files = [];
+		
+		// Add MD transcript
+		const attachmentMd = new AttachmentBuilder()
+			.setFile(Buffer.from(transcriptMd))
+			.setName(fileNameMd);
+		files.push(attachmentMd);
+		
+		// Add HTML transcript if available
+		if (transcriptHtml) {
+			const attachmentHtml = new AttachmentBuilder()
+				.setFile(Buffer.from(transcriptHtml))
+				.setName(fileNameHtml);
+			files.push(attachmentHtml);
+		}
 
-		await interaction.editReply({ files: [attachment] });
+		await interaction.editReply({ files });
 		// TODO: add portal link
 	}
 };
